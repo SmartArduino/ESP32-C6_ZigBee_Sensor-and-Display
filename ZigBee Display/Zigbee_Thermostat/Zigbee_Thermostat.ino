@@ -1,31 +1,3 @@
-// Copyright 2024 Espressif Systems (Shanghai) PTE LTD
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-/**
- * @brief This example demonstrates simple Zigbee thermostat.
- *
- * The example demonstrates how to use ESP Zigbee stack to get data from temperature
- * sensor end device and act as an thermostat.
- * The temperature sensor is a Zigbee end device, which is controlled by a Zigbee coordinator (thermostat).
- * Button switch and Zigbee runs in separate tasks.
- *
- * Proper Zigbee mode must be selected in Tools->Zigbee mode
- * and also the correct partition scheme must be selected in Tools->Partition Scheme.
- *
- * Please check the README.md for instructions and more detailed description.
- */
-
 #ifndef ZIGBEE_MODE_ZCZR
 #error "Zigbee coordinator mode is not selected in Tools->Zigbee mode"
 #endif
@@ -42,35 +14,10 @@
 #define ARRAY_LENTH(arr) (sizeof(arr) / sizeof(arr[0]))
 
 /* Switch configuration */
-#define GPIO_INPUT_IO_TOGGLE_SWITCH GPIO_NUM_9
 #define PAIR_SIZE(TYPE_STR_PAIR)    (sizeof(TYPE_STR_PAIR) / sizeof(TYPE_STR_PAIR[0]))
 
 SH1106Wire display(0x3c, SDA, SCL);     // ADDRESS, SDA, SCL
 
-typedef enum {
-  SWITCH_ON_CONTROL,
-  SWITCH_OFF_CONTROL,
-  SWITCH_ONOFF_TOGGLE_CONTROL,
-  SWITCH_LEVEL_UP_CONTROL,
-  SWITCH_LEVEL_DOWN_CONTROL,
-  SWITCH_LEVEL_CYCLE_CONTROL,
-  SWITCH_COLOR_CONTROL,
-} switch_func_t;
-
-typedef struct {
-  uint8_t pin;
-  switch_func_t func;
-} switch_func_pair_t;
-
-typedef enum {
-  SWITCH_IDLE,
-  SWITCH_PRESS_ARMED,
-  SWITCH_PRESS_DETECTED,
-  SWITCH_PRESSED,
-  SWITCH_RELEASE_DETECTED,
-} switch_state_t;
-
-static switch_func_pair_t button_func_pair[] = {{GPIO_INPUT_IO_TOGGLE_SWITCH, SWITCH_ONOFF_TOGGLE_CONTROL}};
 
 /* Default Coordinator config */
 #define ESP_ZB_ZC_CONFIG()                                                                                        \
@@ -143,52 +90,6 @@ static float zb_s16_to_temperature(int16_t value) {
   return 1.0 * value / 100;
 }
 
-static void esp_zb_buttons_handler(switch_func_pair_t *button_func_pair) {
-  if (button_func_pair->func == SWITCH_ONOFF_TOGGLE_CONTROL) {
-    /* Send "read attributes" command to the bound sensor */
-    esp_zb_zcl_read_attr_cmd_t read_req;
-    read_req.address_mode = ESP_ZB_APS_ADDR_MODE_DST_ADDR_ENDP_NOT_PRESENT;
-    read_req.zcl_basic_cmd.src_endpoint = HA_THERMOSTAT_ENDPOINT;
-    read_req.clusterID = ESP_ZB_ZCL_CLUSTER_ID_TEMP_MEASUREMENT;
-
-    uint16_t attributes[] = {
-      ESP_ZB_ZCL_ATTR_TEMP_MEASUREMENT_VALUE_ID, ESP_ZB_ZCL_ATTR_TEMP_MEASUREMENT_MIN_VALUE_ID, ESP_ZB_ZCL_ATTR_TEMP_MEASUREMENT_MAX_VALUE_ID,
-      ESP_ZB_ZCL_ATTR_TEMP_MEASUREMENT_TOLERANCE_ID
-    };
-    read_req.attr_number = ARRAY_LENTH(attributes);
-    read_req.attr_field = attributes;
-
-    /* Send "configure report attribute" command to the bound sensor */
-    esp_zb_zcl_config_report_cmd_t report_cmd;
-    report_cmd.address_mode = ESP_ZB_APS_ADDR_MODE_DST_ADDR_ENDP_NOT_PRESENT;
-    report_cmd.zcl_basic_cmd.src_endpoint = HA_THERMOSTAT_ENDPOINT;
-    report_cmd.clusterID = ESP_ZB_ZCL_CLUSTER_ID_TEMP_MEASUREMENT;
-
-    int16_t report_change = 200; /* report on each 2 degree changes */
-    esp_zb_zcl_config_report_record_t records[] = {
-      {
-        .direction = ESP_ZB_ZCL_CMD_DIRECTION_TO_SRV,
-        .attributeID = ESP_ZB_ZCL_ATTR_TEMP_MEASUREMENT_VALUE_ID,
-        .attrType = ESP_ZB_ZCL_ATTR_TYPE_S16,
-        .min_interval = 0,
-        .max_interval = 10,
-        .reportable_change = &report_change,
-      },
-    };
-    report_cmd.record_number = ARRAY_LENTH(records);
-    report_cmd.record_field = records;
-
-    esp_zb_lock_acquire(portMAX_DELAY);
-    esp_zb_zcl_config_report_cmd_req(&report_cmd);
-    esp_zb_lock_release();
-    log_i("Send 'configure reporting' command");
-
-    esp_zb_lock_acquire(portMAX_DELAY);
-    esp_zb_zcl_read_attr_cmd_req(&read_req);
-    esp_zb_lock_release();
-    log_i("Send 'read attributes' command");
-  }
-}
 
 static void bdb_start_top_level_commissioning_cb(uint8_t mode_mask) {
   ESP_ERROR_CHECK(esp_zb_bdb_start_top_level_commissioning(mode_mask));
@@ -524,22 +425,7 @@ static void esp_zb_task(void *pvParameters) {
   esp_zb_main_loop_iteration();
 }
 
-/********************* GPIO functions **************************/
-static QueueHandle_t gpio_evt_queue = NULL;
 
-static void IRAM_ATTR gpio_isr_handler(void *arg) {
-  xQueueSendFromISR(gpio_evt_queue, (switch_func_pair_t *)arg, NULL);
-}
-
-static void switch_gpios_intr_enabled(bool enabled) {
-  for (int i = 0; i < PAIR_SIZE(button_func_pair); ++i) {
-    if (enabled) {
-      enableInterrupt((button_func_pair[i]).pin);
-    } else {
-      disableInterrupt((button_func_pair[i]).pin);
-    }
-  }
-}
 
 /********************* Arduino functions **************************/
 void setup() {
@@ -561,52 +447,11 @@ void setup() {
 
   ESP_ERROR_CHECK(esp_zb_platform_config(&config));
 
-  // Init button switch
-  for (int i = 0; i < PAIR_SIZE(button_func_pair); i++) {
-    pinMode(button_func_pair[i].pin, INPUT_PULLUP);
-    /* create a queue to handle gpio event from isr */
-    gpio_evt_queue = xQueueCreate(10, sizeof(switch_func_pair_t));
-    if (gpio_evt_queue == 0) {
-      log_e("Queue was not created and must not be used");
-      while (1);
-    }
-    attachInterruptArg(button_func_pair[i].pin, gpio_isr_handler, (void *)(button_func_pair + i), FALLING);
-  }
 
   // Start Zigbee task
   xTaskCreate(esp_zb_task, "Zigbee_main", 4096, NULL, 5, NULL);
 }
 
 void loop() {
-  // Handle button switch in loop()
-  uint8_t pin = 0;
-  switch_func_pair_t button_func_pair;
-  static switch_state_t switch_state = SWITCH_IDLE;
-  bool evt_flag = false;
 
-  /* check if there is any queue received, if yes read out the button_func_pair */
-  if (xQueueReceive(gpio_evt_queue, &button_func_pair, portMAX_DELAY)) {
-    pin = button_func_pair.pin;
-    switch_gpios_intr_enabled(false);
-    evt_flag = true;
-  }
-  while (evt_flag) {
-    bool value = digitalRead(pin);
-    switch (switch_state) {
-      case SWITCH_IDLE:           switch_state = (value == LOW) ? SWITCH_PRESS_DETECTED : SWITCH_IDLE; break;
-      case SWITCH_PRESS_DETECTED: switch_state = (value == LOW) ? SWITCH_PRESS_DETECTED : SWITCH_RELEASE_DETECTED; break;
-      case SWITCH_RELEASE_DETECTED:
-        switch_state = SWITCH_IDLE;
-        /* callback to button_handler */
-        (*esp_zb_buttons_handler)(&button_func_pair);
-        break;
-      default: break;
-    }
-    if (switch_state == SWITCH_IDLE) {
-      switch_gpios_intr_enabled(true);
-      evt_flag = false;
-      break;
-    }
-    delay(10);
-  }
 }

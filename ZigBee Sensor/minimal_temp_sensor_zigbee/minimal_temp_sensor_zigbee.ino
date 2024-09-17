@@ -68,14 +68,13 @@ static int16_t zb_temperature_to_s16(float temp) {
   return (int16_t)(temp * 100);
 }
 
-static void esp_app_temp_sensor_handler(float temperature) {
-  int16_t measured_value = zb_temperature_to_s16(temperature);
+static void esp_app_temp_sensor_handler(int16_t temperature) {
   Serial.println("Updating temperature sensor value...");
-  Serial.println(measured_value);
+  Serial.println(temperature);
   /* Update temperature sensor measured value */
   esp_zb_lock_acquire(portMAX_DELAY);
   esp_zb_zcl_set_attribute_val(
-    HA_ESP_SENSOR_ENDPOINT, ESP_ZB_ZCL_CLUSTER_ID_TEMP_MEASUREMENT, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE, ESP_ZB_ZCL_ATTR_TEMP_MEASUREMENT_VALUE_ID, &measured_value,
+    HA_ESP_SENSOR_ENDPOINT, ESP_ZB_ZCL_CLUSTER_ID_TEMP_MEASUREMENT, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE, ESP_ZB_ZCL_ATTR_TEMP_MEASUREMENT_VALUE_ID, &temperature,
     false
   );
   esp_zb_lock_release();
@@ -175,11 +174,19 @@ static void esp_zb_task(void *pvParameters) {
 /************************ Temp sensor *****************************/
 static void temp_sensor_value_update(void *arg) {
   for (;;) {
-    float tsens_value = bme.temperature;
-    esp_app_temp_sensor_handler(tsens_value);
+    esp_app_temp_sensor_handler(sensoren());
     delay(1000);  // Send the temperature every second
   }
 }
+
+static int16_t sensoren(){
+
+  return (zb_temperature_to_s16(bme.temperature));//+ zb_temperature_to_s16(bme.humidity));
+
+
+}
+
+
 
 /********************* Arduino functions **************************/
 void setup() {
@@ -203,6 +210,7 @@ void setup() {
   xTaskCreate(esp_zb_task, "Zigbee_main", 4096, NULL, 5, NULL);
 }
 
+
 void loop() {
     if (!bme.performReading()) {
         Serial.println("Failed to perform reading :(");
@@ -213,7 +221,7 @@ void loop() {
     float temperature = bme.temperature;
 
     // Temperaturwert an den ZigBee-Koordinator übermitteln
-    esp_app_temp_sensor_handler(temperature);
+    esp_app_temp_sensor_handler(sensoren());
 
     // 1 Sekunde warten
     delay(1000);
