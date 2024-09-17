@@ -300,7 +300,7 @@ static void temp_sensor_value_update(void *arg) {
       return;
     }
 
-    float tsens_value = bme.temperature;
+    float tsens_value = (bme.temperature - 5);
     esp_app_temp_sensor_handler(tsens_value);
     delay(1000);
   }
