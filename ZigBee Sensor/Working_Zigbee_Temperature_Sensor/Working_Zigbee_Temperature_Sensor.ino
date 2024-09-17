@@ -252,7 +252,7 @@ static void esp_zb_task(void *pvParameters) {
             .max_interval = 0,
             .delta =
               {
-                .u16 = 100,
+                .u16 = 1,
               },
             .def_min_interval = 1,
             .def_max_interval = 0,
@@ -294,6 +294,12 @@ static void switch_gpios_intr_enabled(bool enabled) {
 /************************ Temp sensor *****************************/
 static void temp_sensor_value_update(void *arg) {
   for (;;) {
+
+    if (! bme.performReading()) {
+      Serial.println("Failed to perform reading :(");
+      return;
+    }
+
     float tsens_value = bme.temperature;
     esp_app_temp_sensor_handler(tsens_value);
     delay(1000);
