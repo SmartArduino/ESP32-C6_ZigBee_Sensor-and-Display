@@ -1,21 +1,3 @@
-// Copyright 2024 Espressif Systems (Shanghai) PTE LTD
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-/**
- * @brief This example demonstrates simple Zigbee temperature sensor.
- */
-
 #include "esp_zigbee_core.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -26,14 +8,17 @@
 #include <Adafruit_Sensor.h>
 #include "Adafruit_BME680.h"
 
+
+// Setze PINs für den BME680
 #define BME_SCK 14
 #define BME_MISO 15
 #define BME_MOSI 21
 #define BME_CS 20
 
+// Initialisierung des BME 680
 Adafruit_BME680 bme(BME_CS, BME_MOSI, BME_MISO, BME_SCK);
 
-/* Default End Device config */
+// Standard Endgeräte config
 #define ESP_ZB_ZED_CONFIG()                                                                 \
   {                                                                                         \
     .esp_zb_role = ESP_ZB_DEVICE_TYPE_ED, .install_code_policy = INSTALLCODE_POLICY_ENABLE, \
@@ -46,12 +31,15 @@ Adafruit_BME680 bme(BME_CS, BME_MOSI, BME_MISO, BME_SCK);
     },                                                                                      \
   }
 
+// Zigbee Radio Konfiguration
 #define ESP_ZB_DEFAULT_RADIO_CONFIG() \
   { .radio_mode = ZB_RADIO_MODE_NATIVE, }
 
+// Zigbee Host Konfiguration
 #define ESP_ZB_DEFAULT_HOST_CONFIG() \
   { .host_connection_mode = ZB_HOST_CONNECTION_MODE_NONE, }
 
+// Zigbee Endgeräte Konfiguration
 #define INSTALLCODE_POLICY_ENABLE   false
 #define ED_AGING_TIMEOUT            ESP_ZB_ED_AGING_TIMEOUT_64MIN
 #define ED_KEEP_ALIVE               3000                                 /* 3000 millisecond */
@@ -59,11 +47,12 @@ Adafruit_BME680 bme(BME_CS, BME_MOSI, BME_MISO, BME_SCK);
 #define ESP_ZB_PRIMARY_CHANNEL_MASK ESP_ZB_TRANSCEIVER_ALL_CHANNELS_MASK /* Zigbee primary channel mask */
 
 /* Temperature sensor configuration */
-#define ESP_TEMP_SENSOR_UPDATE_INTERVAL (1)  /* Local sensor update interval (second) */
-#define ESP_TEMP_SENSOR_MIN_VALUE       (10) /* Local sensor min measured value (degree Celsius) */
-#define ESP_TEMP_SENSOR_MAX_VALUE       (50) /* Local sensor max measured value (degree Celsius) */
+#define TEMP_SENSOR_UPDATE_INTERVAL (1)  /* Local sensor update interval (second) */
+#define TEMP_SENSOR_MIN_VALUE       (0) /* Local sensor min measured value (degree Celsius) */
+#define TEMP_SENSOR_MAX_VALUE       (70) /* Local sensor max measured value (degree Celsius) */
 
 /********************* Zigbee functions **************************/
+// Rechnet die Kommawerte vom Typ float, die der ESP zurückgibt in ein int16_t um
 static int16_t zb_temperature_to_s16(float temp) {
   return (int16_t)(temp * 100);
 }
@@ -72,12 +61,12 @@ static void esp_app_temp_sensor_handler(int16_t temperature) {
   Serial.println("Updating temperature sensor value...");
   Serial.println(temperature);
   /* Update temperature sensor measured value */
-  esp_zb_lock_acquire(portMAX_DELAY);
+  esp_zb_lock_acquire(portMAX_DELAY);           // Sperrt den Zigbee Stack für Änderungen
   esp_zb_zcl_set_attribute_val(
     HA_ESP_SENSOR_ENDPOINT, ESP_ZB_ZCL_CLUSTER_ID_TEMP_MEASUREMENT, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE, ESP_ZB_ZCL_ATTR_TEMP_MEASUREMENT_VALUE_ID, &temperature,
     false
-  );
-  esp_zb_lock_release();
+  );                                            // Aktualisieren der Werte
+  esp_zb_lock_release();                        // Freigeben des Zigbee Stacks
 }
 
 void esp_zb_app_signal_handler(esp_zb_app_signal_t *signal_struct) {
@@ -130,15 +119,17 @@ static esp_zb_ep_list_t *custom_temperature_sensor_ep_create(uint8_t endpoint_id
   return ep_list;
 }
 
+
 static void esp_zb_task(void *pvParameters) {
   esp_zb_cfg_t zb_nwk_cfg = ESP_ZB_ZED_CONFIG();
   esp_zb_init(&zb_nwk_cfg);
   esp_zb_temperature_sensor_cfg_t sensor_cfg = ESP_ZB_DEFAULT_TEMPERATURE_SENSOR_CONFIG();
-  sensor_cfg.temp_meas_cfg.min_value = zb_temperature_to_s16(ESP_TEMP_SENSOR_MIN_VALUE);
-  sensor_cfg.temp_meas_cfg.max_value = zb_temperature_to_s16(ESP_TEMP_SENSOR_MAX_VALUE);
+  sensor_cfg.temp_meas_cfg.min_value = zb_temperature_to_s16(TEMP_SENSOR_MIN_VALUE);
+  sensor_cfg.temp_meas_cfg.max_value = zb_temperature_to_s16(TEMP_SENSOR_MAX_VALUE);
   esp_zb_ep_list_t *esp_zb_sensor_ep = custom_temperature_sensor_ep_create(HA_ESP_SENSOR_ENDPOINT, &sensor_cfg);
   esp_zb_device_register(esp_zb_sensor_ep);
 
+  // Konfiguration, wann der Wert geupdatet werden soll
   esp_zb_zcl_reporting_info_t reporting_info = {
     .direction = ESP_ZB_ZCL_CMD_DIRECTION_TO_SRV,
     .ep = HA_ESP_SENSOR_ENDPOINT,
@@ -165,13 +156,14 @@ static void esp_zb_task(void *pvParameters) {
       },
     .manuf_code = ESP_ZB_ZCL_ATTR_NON_MANUFACTURER_SPECIFIC,
   };
-  esp_zb_zcl_update_reporting_info(&reporting_info);
-  esp_zb_set_primary_network_channel_set(ESP_ZB_PRIMARY_CHANNEL_MASK);
+  esp_zb_zcl_update_reporting_info(&reporting_info);        
+  esp_zb_set_primary_network_channel_set(ESP_ZB_PRIMARY_CHANNEL_MASK);    // Setze den primäeren Funkkanal
   ESP_ERROR_CHECK(esp_zb_start(false));
   esp_zb_main_loop_iteration();
 }
 
 /************************ Temp sensor *****************************/
+// Updatet den Temperaturwert jede Sekunde
 static void temp_sensor_value_update(void *arg) {
   for (;;) {
     esp_app_temp_sensor_handler(sensoren());
@@ -179,6 +171,7 @@ static void temp_sensor_value_update(void *arg) {
   }
 }
 
+// Gibt den Wert vom Sensor als int16_t zurück
 static int16_t sensoren(){
 
   return (zb_temperature_to_s16(bme.temperature));//+ zb_temperature_to_s16(bme.humidity));
@@ -190,15 +183,18 @@ static int16_t sensoren(){
 
 /********************* Arduino functions **************************/
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(115200);   // Initialisierung der Seriellen Verbindung
 
+  // Testen, ob Sensor da
   if (!bme.begin()) {
     Serial.println("Could not find a valid BME680 sensor, check wiring!");
     while (1);
   }
+
+  // Oversampling für den BME setzen
   bme.setTemperatureOversampling(BME680_OS_8X);
 
-  // Init Zigbee
+  // Zigbee initialisieren
   esp_zb_platform_config_t config = {
     .radio_config = ESP_ZB_DEFAULT_RADIO_CONFIG(),
     .host_config = ESP_ZB_DEFAULT_HOST_CONFIG(),
@@ -206,12 +202,14 @@ void setup() {
   ESP_ERROR_CHECK(esp_zb_platform_config(&config));
 
 
-  // Start Zigbee task
+  // Zigbee task starten
   xTaskCreate(esp_zb_task, "Zigbee_main", 4096, NULL, 5, NULL);
 }
 
 
 void loop() {
+
+    // Testen und lesen
     if (!bme.performReading()) {
         Serial.println("Failed to perform reading :(");
         return;
