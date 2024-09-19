@@ -190,9 +190,9 @@ static int16_t getData(){
 
     zaehlen++;
     Serial.print("Temperatur: ");
-    Serial.println(bme.temperature);
+    Serial.println(bme.temperature + 4);
     delay(1000);
-    return (zb_temperature_to_s16(bme.temperature));
+    return (zb_temperature_to_s16(bme.temperature) - 400);
 
   }
 
@@ -200,27 +200,27 @@ static int16_t getData(){
 
     zaehlen2++;
     Serial.print("Luftfeuchte: ");
-    Serial.println(bme.humidity);
+    Serial.println(bme.humidity + 3);
     delay(1000);
-    return (zb_temperature_to_s16(bme.humidity));
+    return (zb_temperature_to_s16(bme.humidity) + 300);
 
   }
 
   else if ((zaehlen % 2 != 0) && (zaehlen2 % 2 != 0)){
     zaehlen++;
     Serial.print("Hoehe: ");
-    Serial.println(bme.readAltitude(SEALEVELPRESSURE_HPA));
+    Serial.println(bme.readAltitude(SEALEVELPRESSURE_HPA) + 100);
     delay(1000);
-    return (bme.readAltitude(SEALEVELPRESSURE_HPA));
+    return (bme.readAltitude(SEALEVELPRESSURE_HPA) + 100);
 
   }
 
   else if ((zaehlen % 2 == 0) && (zaehlen2 % 2 != 0)){
     zaehlen2++;
     Serial.print("Luftdruck: ");
-    Serial.println(getPressure());
+    Serial.println(getPressure() + 51);
     delay(1000);
-    return(getPressure());
+    return(getPressure() + 51);
 
 
   }
