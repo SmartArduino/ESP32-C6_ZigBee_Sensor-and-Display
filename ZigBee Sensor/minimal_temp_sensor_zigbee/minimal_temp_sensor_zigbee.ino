@@ -15,6 +15,8 @@
 #define BME_MOSI 21
 #define BME_CS 20
 
+#define SEALEVELPRESSURE_HPA (1013.25)
+
 // Initialisierung des BME 680
 Adafruit_BME680 bme(BME_CS, BME_MOSI, BME_MISO, BME_SCK);
 
@@ -58,8 +60,6 @@ static int16_t zb_temperature_to_s16(float temp) {
 }
 
 static void esp_app_temp_sensor_handler(int16_t temperature) {
-  Serial.println("Updating temperature sensor value...");
-  Serial.println(temperature);
   /* Update temperature sensor measured value */
   esp_zb_lock_acquire(portMAX_DELAY);           // Sperrt den Zigbee Stack für Änderungen
   esp_zb_zcl_set_attribute_val(
@@ -141,13 +141,13 @@ static void esp_zb_task(void *pvParameters) {
         .send_info =
           {
             .min_interval = 1,
-            .max_interval = 5,
+            .max_interval = 0,
             .delta =
               {
-                .u16 = 10,
+                .u16 = 0,
               },
             .def_min_interval = 1,
-            .def_max_interval = 5,
+            .def_max_interval = 0,
           },
       },
     .dst =
@@ -162,20 +162,70 @@ static void esp_zb_task(void *pvParameters) {
   esp_zb_main_loop_iteration();
 }
 
+uint16_t getPressure() {
+
+  return (uint16_t)(bme.pressure / 100);
+
+}
+
+
+
+
 /************************ Temp sensor *****************************/
 // Updatet den Temperaturwert jede Sekunde
 static void temp_sensor_value_update(void *arg) {
   for (;;) {
-    esp_app_temp_sensor_handler(sensoren());
+    esp_app_temp_sensor_handler(getData());
     delay(1000);  // Send the temperature every second
   }
 }
 
+uint16_t zaehlen = 0;
+uint16_t zaehlen2 = 0;
+
 // Gibt den Wert vom Sensor als int16_t zurück
-static int16_t sensoren(){
+static int16_t getData(){
 
-  return (zb_temperature_to_s16(bme.temperature));//+ zb_temperature_to_s16(bme.humidity));
+  if((zaehlen % 2 == 0) && (zaehlen2 % 2 == 0)){
 
+    zaehlen++;
+    Serial.print("Temperatur: ");
+    Serial.println(bme.temperature);
+    delay(1000);
+    return (zb_temperature_to_s16(bme.temperature));
+
+  }
+
+  else if ((zaehlen % 2 != 0) && (zaehlen2 % 2 == 0)){
+
+    zaehlen2++;
+    Serial.print("Luftfeuchte: ");
+    Serial.println(bme.humidity);
+    delay(1000);
+    return (zb_temperature_to_s16(bme.humidity));
+
+  }
+
+  else if ((zaehlen % 2 != 0) && (zaehlen2 % 2 != 0)){
+    zaehlen++;
+    Serial.print("Hoehe: ");
+    Serial.println(bme.readAltitude(SEALEVELPRESSURE_HPA));
+    delay(1000);
+    return (bme.readAltitude(SEALEVELPRESSURE_HPA));
+
+  }
+
+  else if ((zaehlen % 2 == 0) && (zaehlen2 % 2 != 0)){
+    zaehlen2++;
+    Serial.print("Luftdruck: ");
+    Serial.println(getPressure());
+    delay(1000);
+    return(getPressure());
+
+
+  }
+
+return 0;
 
 }
 
@@ -193,6 +243,10 @@ void setup() {
 
   // Oversampling für den BME setzen
   bme.setTemperatureOversampling(BME680_OS_8X);
+  bme.setHumidityOversampling(BME680_OS_2X);
+  bme.setPressureOversampling(BME680_OS_4X);
+  bme.setIIRFilterSize(BME680_FILTER_SIZE_3);
+  bme.setGasHeater(320, 150); // 320*C for 150 ms
 
   // Zigbee initialisieren
   esp_zb_platform_config_t config = {
@@ -215,11 +269,8 @@ void loop() {
         return;
     }
 
-    // Aktuelle Temperatur auslesen
-    float temperature = bme.temperature;
-
     // Temperaturwert an den ZigBee-Koordinator übermitteln
-    esp_app_temp_sensor_handler(sensoren());
+    esp_app_temp_sensor_handler(getData());
 
     // 1 Sekunde warten
     delay(1000);

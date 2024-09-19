@@ -10,12 +10,12 @@
 #include <Wire.h>               // Only needed for Arduino 1.6.5 and earlier
 #include "SH1106Wire.h"   // legacy: #include "SH1106.h"
 
+#define MAX_SENSORS 2
+
 
 #define ARRAY_LENTH(arr) (sizeof(arr) / sizeof(arr[0]))
 
-/* Switch configuration */
-#define PAIR_SIZE(TYPE_STR_PAIR)    (sizeof(TYPE_STR_PAIR) / sizeof(TYPE_STR_PAIR[0]))
-
+// Display Initialisieren
 SH1106Wire display(0x3c, SDA, SCL);     // ADDRESS, SDA, SCL
 
 
@@ -85,6 +85,9 @@ void splashscreen(){
 
 }
 
+static temp_sensor_device_params_t temp_sensors[MAX_SENSORS];
+static int sensor_count = 0;
+
 /********************* Zigbee functions **************************/
 static float zb_s16_to_temperature(int16_t value) {
   return 1.0 * value / 100;
@@ -132,50 +135,32 @@ static void bind_cb(esp_zb_zdp_status_t zdo_status, void *user_ctx) {
 }
 
 static void user_find_cb(esp_zb_zdp_status_t zdo_status, uint16_t addr, uint8_t endpoint, void *user_ctx) {
-  if (zdo_status == ESP_ZB_ZDP_STATUS_SUCCESS) {
+  if (zdo_status == ESP_ZB_ZDP_STATUS_SUCCESS && sensor_count < MAX_SENSORS) {
     log_i("Found temperature sensor");
-    /* Store the information of the remote device */
-    temp_sensor_device_params_t *sensor = (temp_sensor_device_params_t *)user_ctx;
-    sensor->endpoint = endpoint;
-    sensor->short_addr = addr;
-    esp_zb_ieee_address_by_short(sensor->short_addr, sensor->ieee_addr);
-    log_d("Temperature sensor found: short address(0x%x), endpoint(%d)", sensor->short_addr, sensor->endpoint);
 
-    /* 1. Send binding request to the sensor */
+    /* Store the information of the remote device */
+    temp_sensors[sensor_count].endpoint = endpoint;
+    temp_sensors[sensor_count].short_addr = addr;
+    esp_zb_ieee_address_by_short(temp_sensors[sensor_count].short_addr, temp_sensors[sensor_count].ieee_addr);
+
+    log_d("Temperature sensor found: short address(0x%x), endpoint(%d)", temp_sensors[sensor_count].short_addr, temp_sensors[sensor_count].endpoint);
+    
+    /* Proceed with binding */
     esp_zb_zdo_bind_req_param_t *bind_req = (esp_zb_zdo_bind_req_param_t *)calloc(sizeof(esp_zb_zdo_bind_req_param_t), 1);
     bind_req->req_dst_addr = addr;
-    log_d("Request temperature sensor to bind us");
-
-    /* populate the src information of the binding */
-    memcpy(bind_req->src_address, sensor->ieee_addr, sizeof(esp_zb_ieee_addr_t));
+    memcpy(bind_req->src_address, temp_sensors[sensor_count].ieee_addr, sizeof(esp_zb_ieee_addr_t));
     bind_req->src_endp = endpoint;
     bind_req->cluster_id = ESP_ZB_ZCL_CLUSTER_ID_TEMP_MEASUREMENT;
-    log_d("Bind temperature sensor");
 
-    /* populate the dst information of the binding */
+    /* Populate the destination info */
     bind_req->dst_addr_mode = ESP_ZB_ZDO_BIND_DST_ADDR_MODE_64_BIT_EXTENDED;
     esp_zb_get_long_address(bind_req->dst_address_u.addr_long);
     bind_req->dst_endp = HA_THERMOSTAT_ENDPOINT;
 
-    log_i("Request temperature sensor to bind us");
+    /* Request binding for the sensor */
     esp_zb_zdo_device_bind_req(bind_req, bind_cb, bind_req);
-
-    /* 2. Send binding request to self */
-    bind_req = (esp_zb_zdo_bind_req_param_t *)calloc(sizeof(esp_zb_zdo_bind_req_param_t), 1);
-    bind_req->req_dst_addr = esp_zb_get_short_address();
-
-    /* populate the src information of the binding */
-    esp_zb_get_long_address(bind_req->src_address);
-    bind_req->src_endp = HA_THERMOSTAT_ENDPOINT;
-    bind_req->cluster_id = ESP_ZB_ZCL_CLUSTER_ID_TEMP_MEASUREMENT;
-
-    /* populate the dst information of the binding */
-    bind_req->dst_addr_mode = ESP_ZB_ZDO_BIND_DST_ADDR_MODE_64_BIT_EXTENDED;
-    memcpy(bind_req->dst_address_u.addr_long, sensor->ieee_addr, sizeof(esp_zb_ieee_addr_t));
-    bind_req->dst_endp = endpoint;
-
-    log_i("Bind temperature sensor");
-    esp_zb_zdo_device_bind_req(bind_req, bind_cb, bind_req);
+    
+    sensor_count++;
   }
 }
 
@@ -255,32 +240,60 @@ void esp_zb_app_signal_handler(esp_zb_app_signal_t *signal_struct) {
   }
 }
 
-static void esp_app_zb_attribute_handler(uint16_t cluster_id, const esp_zb_zcl_attribute_t *attribute) {
-  /* Basic cluster attributes */
-  if (cluster_id == ESP_ZB_ZCL_CLUSTER_ID_BASIC) {
-    if (attribute->id == ESP_ZB_ZCL_ATTR_BASIC_MANUFACTURER_NAME_ID && attribute->data.type == ESP_ZB_ZCL_ATTR_TYPE_CHAR_STRING && attribute->data.value) {
-      zbstring_t *zbstr = (zbstring_t *)attribute->data.value;
-      char *string = (char *)malloc(zbstr->len + 1);
-      memcpy(string, zbstr->data, zbstr->len);
-      string[zbstr->len] = '\0';
-      log_i("Peer Manufacturer is \"%s\"", string);
-      free(string);
-    }
-    if (attribute->id == ESP_ZB_ZCL_ATTR_BASIC_MODEL_IDENTIFIER_ID && attribute->data.type == ESP_ZB_ZCL_ATTR_TYPE_CHAR_STRING && attribute->data.value) {
-      zbstring_t *zbstr = (zbstring_t *)attribute->data.value;
-      char *string = (char *)malloc(zbstr->len + 1);
-      memcpy(string, zbstr->data, zbstr->len);
-      string[zbstr->len] = '\0';
-      log_i("Peer Model is \"%s\"", string);
-      free(string);
-    }
-  }
+bool ankerpunkt = false;
+uint16_t zaehlen = 0;
+uint16_t zaehlen2 = 0;
+int16_t anzeige_temperatur = 0;
+int16_t anzeige_luftfeuchte = 0;
+int16_t anzeige_hoehe = 0;
+int16_t anzeige_luftdruck = 0;
 
-  /* Temperature Measurement cluster attributes */
-  if (cluster_id == ESP_ZB_ZCL_CLUSTER_ID_TEMP_MEASUREMENT) {
-    if (attribute->id == ESP_ZB_ZCL_ATTR_TEMP_MEASUREMENT_VALUE_ID && attribute->data.type == ESP_ZB_ZCL_ATTR_TYPE_S16) {
-      int16_t value = attribute->data.value ? *(int16_t *)attribute->data.value : 0;
-      log_i("Measured Value is %.2f degrees Celsius", zb_s16_to_temperature(value));
+static void esp_app_zb_attribute_handler(uint16_t cluster_id, const esp_zb_zcl_attribute_t *attribute) {
+  if (cluster_id == ESP_ZB_ZCL_CLUSTER_ID_TEMP_MEASUREMENT && attribute->id == ESP_ZB_ZCL_ATTR_TEMP_MEASUREMENT_VALUE_ID) {
+    int16_t value = attribute->data.value ? *(int16_t *)attribute->data.value : 0;
+    float temperature = zb_s16_to_temperature(value);
+
+    // Ausgabe für alle Sensoren
+
+    log_i("Sensor %d - Measured Value: %.2f", cluster_id, temperature);
+
+    if ((value > 4000) && !ankerpunkt){
+
+      ankerpunkt = true;
+
+    }
+
+    if (ankerpunkt){
+
+      if((zaehlen % 2 == 0) && (zaehlen2 % 2 == 0)){
+
+        anzeige_luftfeuchte = value;
+        zaehlen++;
+
+      }
+
+      else if ((zaehlen % 2 != 0) && (zaehlen2 % 2 == 0)){
+
+        anzeige_hoehe = value;
+        zaehlen2++;
+
+      }
+
+      else if ((zaehlen % 2 != 0) && (zaehlen2 % 2 != 0)){
+
+        anzeige_luftdruck = value;
+
+        zaehlen++;
+
+      }
+
+      else if ((zaehlen % 2 == 0) && (zaehlen2 % 2 != 0)){
+
+        anzeige_temperatur = value;
+
+        zaehlen2++;
+
+      }
 
       display.clear();
       display.setFont(ArialMT_Plain_16);
@@ -288,22 +301,27 @@ static void esp_app_zb_attribute_handler(uint16_t cluster_id, const esp_zb_zcl_a
       display.drawString(0, 0, "Sensorwerte");
       display.setFont(ArialMT_Plain_10);
       display.drawString(0, 20, "Temperatur: ");
-      display.drawString(64, 20, String(zb_s16_to_temperature(value)) + " °C");
+      display.drawString(80, 20, String(zb_s16_to_temperature(anzeige_temperatur)) + " °C");
+      display.drawString(0, 30, "Luftfeuchtigkeit: ");
+      display.drawString(80, 30, String(zb_s16_to_temperature(anzeige_luftfeuchte)) + " %");
+      display.drawString(0, 40, "Höhe: ");
+      display.drawString(80, 40, String(anzeige_hoehe) + "m");
+      display.drawString(0, 50, "Luftdruck: ");
+      display.drawString(80, 50, String(anzeige_luftdruck) + " hPa");
+      display.display();
+    }
+
+    else{
+
+      display.clear();
+      display.setTextAlignment(TEXT_ALIGN_CENTER);
+      display.setFont(ArialMT_Plain_10);
+      display.drawString(64, 32, "Waiting...");
       display.display();
 
+
     }
-    if (attribute->id == ESP_ZB_ZCL_ATTR_TEMP_MEASUREMENT_MIN_VALUE_ID && attribute->data.type == ESP_ZB_ZCL_ATTR_TYPE_S16) {
-      int16_t min_value = attribute->data.value ? *(int16_t *)attribute->data.value : 0;
-      log_i("Min Measured Value is %.2f degrees Celsius", zb_s16_to_temperature(min_value));
-    }
-    if (attribute->id == ESP_ZB_ZCL_ATTR_TEMP_MEASUREMENT_MAX_VALUE_ID && attribute->data.type == ESP_ZB_ZCL_ATTR_TYPE_S16) {
-      int16_t max_value = attribute->data.value ? *(int16_t *)attribute->data.value : 0;
-      log_i("Max Measured Value is %.2f degrees Celsius", zb_s16_to_temperature(max_value));
-    }
-    if (attribute->id == ESP_ZB_ZCL_ATTR_TEMP_MEASUREMENT_TOLERANCE_ID && attribute->data.type == ESP_ZB_ZCL_ATTR_TYPE_U16) {
-      uint16_t tolerance = attribute->data.value ? *(uint16_t *)attribute->data.value : 0;
-      log_i("Tolerance is %.2f degrees Celsius", 1.0 * tolerance / 100);
-    }
+
   }
 }
 
